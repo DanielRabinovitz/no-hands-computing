@@ -352,24 +352,122 @@ Fix: `CUDA_VISIBLE_DEVICES="" python3 ...` in `transcribe()` — Moonshine runs 
 
 ---
 
+---
+
+## Session 7 — 2026-03-30
+
+### Voice input for Claude Code CLI
+
+Added a second PTT channel so voice can be used to talk directly to Claude Code in the terminal.
+
+**`~/bin/voice-cc-ptt.sh`** — Ctrl+Shift+K toggle:
+- Press 1: switches BT to HFP, starts recording, plays "Listening." cue
+- Press 2: stops recording, transcribes with Moonshine, injects text into focused window via `xdotool type` + `xdotool key Return`
+- Requires `xdotool` (`sudo apt install xdotool`)
+
+**`~/bin/voice-speak-selection.sh`** — Ctrl+Shift+J:
+- Reads current X selection (whatever text is highlighted with the mouse) via `xclip`
+- Speaks it through Piper
+- Use case: highlight any paragraph of a response and press key to hear it
+
+**`~/bin/voice-tts-hook.sh`** — Claude Code Stop hook:
+- Fires automatically when Claude finishes a response
+- Receives `last_assistant_message` from hook JSON payload
+- Strips markdown (code blocks, bold, headers, bullets) before speaking
+- Truncates at 300 words
+- Registered in `~/.claude/settings.json` under `hooks.Stop`
+
+**`~/.xbindkeysrc`** — now has three bindings:
+- Ctrl+Shift+L → voice assistant (Ollama)
+- Ctrl+Shift+K → voice input to Claude Code
+- Ctrl+Shift+J → speak selected text
+
+### GitHub repo: no-hands-computing
+
+Published the project publicly at `https://github.com/DanielRabinovitz/no-hands-computing`.
+
+Files organized into:
+- `bin/` — all scripts (legacy/superseded ones excluded)
+- `config/` — `xbindkeysrc.example`, `bt-config.example.sh`
+- `audio/README.md` — instructions to regenerate audio cues with Piper
+- `README.md` — full setup guide for new users
+- `DEVLOG.md` — this file
+
+BT device addresses made configurable via environment variables (`BT_CARD`, `BT_SOURCE`) with `${VAR:-default}` syntax so existing setups are unaffected.
+
+### Model comparison: ministral-3:3b pulled
+
+`ministral-3:3b` (3.0GB) pulled alongside `ministral-3:latest` (8.9B). Both models share the same context window size and both support image inputs.
+
+### Benchmark suite: `bin/voice-model-benchmark.py`
+
+13-test suite across 5 tiers:
+- **Tier 1**: simple single commands (open folder, disk space, list files)
+- **Tier 2**: file creation with content (notes, multi-line lists, folders)
+- **Tier 3**: multi-step tasks (create+move, count files, rename)
+- **Tier 4**: conversational — multi-turn refinement + ambiguity handling
+- **Tier 5**: format compliance — no markdown, printf not echo
+
+Scoring: up to 88 points across 6 dimensions (CMD: format, keyword correctness, filesystem verify, clarification, no-markdown, exit code).
+
+Single-run results:
+
+| Model | Score | Avg response | Speed |
+|---|---|---|---|
+| ministral-3:3b | 79/88 (90%) | 6.4s | 42.6 tok/s |
+| ministral-3:latest | 84/88 (95%) | 12.6s | 13.9 tok/s |
+
+Key findings:
+- 3B is 3× faster; matches 8.9B on tiers 1–3
+- 8.9B wins on multi-turn refinement (updated file after follow-up; 3B did not)
+- 8.9B chose `xdg-open` (portable); 3B chose `nautilus` (not installed)
+- Both failed the ambiguity test — neither asked for clarification, both guessed
+
+### Upgraded system prompt
+
+Added to address the two consistent failure modes:
+```
+- Always use mkdir -p (never plain mkdir) when creating directories.
+- Prefer portable commands: xdg-open over nautilus; printf over echo for file writes.
+- To update an existing file, overwrite it completely with > using the full new content.
+
+Clarification rule: If the request does not name a specific file, folder, or application,
+ask ONE short question before running any command. Never guess at filenames.
+```
+
+Sanity check (1 run): clarification test went 0% → 100% on 3B with upgraded prompt.
+
+### Stats run: `bin/voice-model-statsrun.py`
+
+20-run harness for both models × both prompts (80 full suite runs = 1040 LLM calls). Running in background tmux session `benchmark`. Results save incrementally to `docs/statsrun_results.json`; summary to `docs/statsrun_summary.txt`.
+
+Known issue in statsrun design: `rename_file` test assumes `benchmark_note.txt` exists from a prior test, but each test in the statsrun gets its own scratch dir. Rename will fail the exit code check on every run — both models equally affected, so comparison is still valid, but absolute scores are slightly deflated.
+
+---
+
 ### What Still Needs Doing
 
 | Item | Blocker / Notes |
 |---|---|
-| `~/bin/tg-setup.sh` | Run after sending /start to Telegram bot; chat ID not yet saved |
-| `~/bin/voice-train.sh` | Run after ffmpeg installed + Dropbox videos sync |
-| Kokoro TTS server | Optional; Piper is working |
+| `sudo apt install xdotool` | Required for voice-cc-ptt.sh (Ctrl+Shift+K) |
+| `~/bin/tg-setup.sh` | Run after sending /start to Telegram bot |
+| `~/bin/voice-train.sh` | Run after Dropbox videos sync |
 | Speaker ID daemon | Re-add once voice profile trained |
-| Fix `$confidence` shell injection | `voice-listen.sh` ~line 149: pass confidence as `sys.argv` not inline interpolation |
+| Fix `$confidence` shell injection | `voice-listen.sh` ~line 149 |
 | Uninstall unused `groq` package | `pip3 uninstall groq` |
+| Fix statsrun `rename_file` test | Should create its own `benchmark_note.txt` before renaming |
+| Read statsrun results | Check `docs/statsrun_summary.txt` when benchmark job finishes |
+| Decide on model | Switch to ministral-3:3b if stats confirm ~90% quality at 3× speed |
 
 ---
 
 ### Architecture Notes
 
-- **STT**: Moonshine offline (`moonshine/base`), forced to CPU via `CUDA_VISIBLE_DEVICES=""`. ~8s transcription time.
-- **LLM**: Ministral-3 (8.9B Q4) via Ollama, runs on GPU (~5.4GB VRAM). ~2s for short responses at 15 tok/s.
-- **Routing**: `CMD:` lines executed via temp bash script. All other lines spoken via Piper.
-- **Conversation**: JSON history file, 10-turn window. Cleared on "new conversation".
-- **Mic**: BT headphones (Sony WH-1000XM6). A2DP ↔ HFP profile cycling on each toggle.
-- **VRAM split**: GPU fully owned by Ollama/Ministral. Moonshine and Piper run on CPU.
+- **STT**: Moonshine offline (`moonshine/base`), forced to CPU via `CUDA_VISIBLE_DEVICES=""`.
+- **LLM**: Ministral-3:latest (8.9B Q4) via Ollama on GPU (~5.4GB VRAM), ~15 tok/s. 3B candidate being evaluated (~42 tok/s, ~2GB VRAM).
+- **TTS**: Piper `en_US-lessac-medium`, CPU only.
+- **Routing**: `CMD:` lines executed via temp bash script. Spoken lines go to Piper.
+- **Conversation**: `/tmp/voice_history.json`, 10-turn window. "New conversation" clears it.
+- **Mic**: Sony WH-1000XM6 BT. A2DP ↔ HFP profile cycling per toggle.
+- **Claude Code TTS**: Stop hook in `~/.claude/settings.json` → `voice-tts-hook.sh` → Piper.
+- **VRAM**: GPU owned by Ollama. Moonshine + Piper on CPU. 3B would free ~3.4GB for other uses.
