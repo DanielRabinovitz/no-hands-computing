@@ -1,0 +1,19 @@
+# ~/.xbindkeysrc — keyboard shortcuts for No Hands Computing
+#
+# Copy this file to ~/.xbindkeysrc and restart xbindkeys.
+# Start xbindkeys automatically: add to ~/.config/autostart/
+
+# Ctrl+Shift+L — push-to-talk for Ollama voice assistant
+#   First press = start listening, second press = stop + execute
+"~/bin/voice-ptt-toggle.sh &"
+  Control+Shift+l
+
+# Ctrl+Shift+K — push-to-talk for Claude Code
+#   Transcribes and types into the focused terminal window
+"~/bin/voice-cc-ptt.sh &"
+  Control+Shift+k
+
+# Ctrl+Shift+J — speak selected text aloud
+#   Highlight any text with the mouse, then press this to hear it read
+"~/bin/voice-speak-selection.sh &"
+  Control+Shift+j

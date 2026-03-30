@@ -1,0 +1,24 @@
+# Secrets and keys
+*.key
+*.secret
+*_secret.txt
+.env
+
+# Generated audio assets (regenerate with audio/README.md instructions)
+audio/*.wav
+*.wav
+
+# Piper models (large binary files, download separately)
+models/
+
+# Runtime state files
+/tmp/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor
+.vscode/
+*.swp
